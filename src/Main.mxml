@@ -1,0 +1,224 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009"
+                       xmlns:s="library://ns.adobe.com/flex/spark"
+                       xmlns:mx="library://ns.adobe.com/flex/mx" backgroundColor="0xF0F0F0" addedToStage="init(event)">
+	
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<fx:Script>
+		<![CDATA[
+		import com.ra2.data.PalFile;
+		import com.ra2.data.TmpFile;
+		import com.ra2.data.TmpImage;
+		import com.ra2.display.TileDisplay;
+		import flash.display.Bitmap;
+		import flash.display.BitmapData;
+		import flash.display.Shape;
+		import flash.events.Event;
+		import flash.events.MouseEvent;
+		import flash.filesystem.File;
+		import flash.geom.ColorTransform;
+		import flash.geom.Rectangle;
+		import flash.net.FileFilter;
+		import flash.utils.ByteArray;
+		import flash.utils.Endian;
+		import flash.utils.setTimeout;
+		import mx.containers.ViewStack;
+		import mx.core.FlexSprite;
+		import mx.core.UIComponent;
+		import spark.core.SpriteVisualElement;
+		
+		public var palFile:PalFile;
+		
+		public function init(e:Event):void 
+		{
+			removeEventListener(e.type, arguments.callee);
+			//
+			
+		}
+		
+		
+		public function onBrowseTmpBtnClick(e:MouseEvent):void
+		{
+			var file:File = new File();
+			file.addEventListener(Event.SELECT, onFileSelect);
+			file.browseForOpen("打开TMP文件", [new FileFilter("template地图文件", "*.tem;*.png;")]);
+		}
+		
+		public function onBrowsePalBtnClick(e:MouseEvent):void
+		{
+			var file:File = new File();
+			file.addEventListener(Event.SELECT, onFileSelect);
+			file.browseForOpen("打开PAL文件", [new FileFilter("palette配色文件", "*.pal")]);
+		}
+		
+		private function onFileSelect(e:Event):void 
+		{
+			e.currentTarget.removeEventListener(e.type, arguments.callee);
+			//
+			var file:File = e.currentTarget as File;
+			file.addEventListener(Event.COMPLETE, onFileComplete);
+			
+			setTimeout(function():void
+			{
+				file.load();
+			}, 100);
+		}
+		private function onFileComplete(e:Event):void 
+		{
+			e.currentTarget.removeEventListener(e.type, arguments.callee);
+			//
+			var file:File = e.currentTarget as File;
+			
+			if (file.nativePath.indexOf(".tem") != -1)
+			{
+				parseTmpFile(file.data);
+			}
+			else if (file.nativePath.indexOf(".pal") != -1)
+			{
+				parsePalFile(file.data);
+			}
+		}
+		
+		private function parsePalFile(bytes:ByteArray):void 
+		{
+			palFile = new PalFile();
+			
+			palFile.readFromBytes(bytes);
+			
+			container2.removeAllElements();
+			
+			var canvas:UIComponent = new UIComponent();
+			container2.addChild(canvas);
+			
+			var maxCols:int = 8;
+			var maxRows:int = 32;
+			var rect:Rectangle = new Rectangle(0, 0, 12, 6);
+			var shape:Shape = new Shape();
+			var index:int = 0;
+			
+			for (var i:int = 0; i < maxCols; i++) 
+			{
+				for (var j:int = 0; j < maxRows; j++) 
+				{
+					var color:uint = palFile.colours[index++];
+					shape.graphics.beginFill(color);
+					shape.graphics.drawRect(i * rect.width, j * rect.height, rect.width, rect.height);
+				}
+			}
+			
+			canvas.addChild(shape);
+		}
+		
+		private function parseTmpFile(bytes:ByteArray):void 
+		{
+			var tmpFile:TmpFile = new TmpFile();
+			tmpFile.readFromBytes(bytes);
+			
+			var rect:Rectangle = tmpFile.getRect();
+			trace(rect);
+			
+			container1.removeAllElements();
+			container3.removeAllElements();
+			
+			var canvas:UIComponent = new UIComponent();
+			container1.addElement(canvas);
+			
+			var canvas2:UIComponent = new UIComponent();
+			container3.addElement(canvas2);
+			
+			if (tmpFile.tmpImages)
+			{
+				var maxCols:int = 5;
+				
+				for (var i:int = 0; i < tmpFile.tmpImages.length; i++) 
+				{
+					var colors:Vector.<uint> = null;
+					if (palFile)
+						colors = palFile.colours;
+						
+					var tmpImg:TmpImage = tmpFile.tmpImages[i];
+					var data:BitmapData = tmpImg.toBitmapData(colors);
+					
+					var j:int = i % maxCols;
+					var k:int = Math.floor(i / maxCols);
+					var tileDisplay:TileDisplay = new TileDisplay(data, i);
+					tileDisplay.x = j * 80;
+					tileDisplay.y = k * 120;
+					canvas.addChild(tileDisplay);
+					
+					if (tmpImg.hasExtraData())
+					{
+						var offsetX:int = tmpImg.extraX - tmpImg.x;
+						var offsetY:int = tmpImg.extraY - tmpImg.y;
+						var extraTile:TileDisplay = new TileDisplay(tmpImg.toExtraBitmapData(colors), i);
+						extraTile.x = tileDisplay.x + offsetX;
+						extraTile.y = tileDisplay.y + offsetY;
+						extraTile.transform.colorTransform = new ColorTransform(1.5, 1, 1.2);
+						canvas.addChild(extraTile);
+					}
+				}
+				
+				for (i = 0; i < tmpFile.tmpImages.length; i++) 
+				{
+					tmpImg = tmpFile.tmpImages[i];
+					
+					data = tmpImg.toBitmapData(colors);
+					var bitmap:Bitmap = new Bitmap(data);
+					bitmap.x = tmpImg.x;
+					bitmap.y = tmpImg.y - tmpImg.height * tmpFile.tileHeight / 2;
+					
+					canvas2.addChild(bitmap);
+					
+					if (tmpImg.hasExtraData())
+					{
+						bitmap = new Bitmap(tmpImg.toExtraBitmapData(colors));
+						bitmap.x = tmpImg.extraX;
+						bitmap.y = tmpImg.extraY - tmpImg.height * tmpFile.tileHeight / 2;
+						canvas2.addChild(bitmap);
+					}
+				}
+				
+				var shape:Shape = new Shape();
+				shape.graphics.lineStyle(2, 0xff0000);
+				shape.graphics.moveTo(0, 0);
+				shape.graphics.lineTo(30, 0);
+				shape.graphics.moveTo(0, 0);
+				shape.graphics.lineTo(0, 15);
+				canvas2.addChild(shape);
+				
+				shape.graphics.lineStyle(0, 0, 0);
+				shape.graphics.beginFill(0, 0.2);
+				shape.graphics.drawRect(rect.x, rect.y, rect.width, rect.height);
+				canvas2.x = -rect.x;
+				canvas2.y = -rect.y;
+			}
+			
+		}
+		
+		private function test():void
+		{
+		}
+		]]>
+	</fx:Script>
+	
+	<s:VGroup x="40" y="50">
+		<s:HGroup>
+			<s:Button click="onBrowseTmpBtnClick(event)">浏览Tmp文件</s:Button>
+			<s:Button click="onBrowsePalBtnClick(event)">浏览Pal文件</s:Button>
+		</s:HGroup>
+		<s:HGroup paddingTop="20">
+			<s:VGroup paddingTop="40">
+				<mx:Container id="container1" width="420" height="600"></mx:Container>
+			</s:VGroup>
+			<mx:VRule height="600"></mx:VRule>
+			<s:VGroup>
+				<mx:Container id="container2" width="230" height="210"></mx:Container>
+				<mx:Container id="container3" width="400" height="600"></mx:Container>
+			</s:VGroup>
+		</s:HGroup>
+	</s:VGroup>
+	
+	
+</s:WindowedApplication>
